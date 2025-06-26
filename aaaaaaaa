@@ -1,0 +1,409 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}MotoTec{% endblock %}</title>
+    <link rel="icon" href="{% static 'imagem/Logo.png' %}" type="image/png">
+    <!-- <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" /> -->
+    <link rel="stylesheet" href="{% static 'css/mapa.css' %}">
+    <link rel="stylesheet" href="{% static 'css/rota.css' %}">
+    <script src="https://cdn.tailwindcss.com"></script>
+    {% block head %}{% endblock %}
+
+    <style>
+      /* Garante que o conteúdo do modal fique acima do overlay */
+      #modalLogout > div,
+      #restauranteModal > div {
+        position: relative;
+        z-index: 10000;
+      }
+
+      /* Estilos para o botão de localização */
+      .location-btn {
+        transition: all 0.3s ease;
+      }
+      
+      .location-btn:disabled {
+        opacity: 0.6;
+        cursor: not-allowed;
+      }
+      
+      .location-btn.active {
+        background-color: #3b82f6;
+        color: white;
+      }
+      
+      .location-btn.active:hover {
+        background-color: #2563eb;
+      }
+      
+      .location-btn.loading {
+        animation: pulse 2s infinite;
+      }
+      
+      @keyframes pulse {
+        0% { transform: scale(1); opacity: 1; }
+        50% { transform: scale(1.05); opacity: 0.8; }
+        100% { transform: scale(1); opacity: 1; }
+      }
+      
+      /* Estilo para o marcador de localização */
+      .user-location-marker .animate-ping {
+        animation: ping 2s cubic-bezier(0, 0, 0.2, 1) infinite;
+      }
+      
+      @keyframes ping {
+        0% { transform: scale(1); opacity: 1; }
+        70% { transform: scale(3); opacity: 0; }
+        100% { transform: scale(1); opacity: 0; }
+      }
+      
+      /* Estilo para o modal de localização */
+      .location-modal {
+        transition: all 0.3s ease;
+      }
+      
+      .location-modal.hidden {
+        opacity: 0;
+        pointer-events: none;
+      }
+      
+      /* Estilo para o modal de detalhes */
+      #restauranteModal {
+        transition: opacity 0.3s ease;
+      }
+
+      #restauranteModal:not(.hidden) {
+        display: flex;
+      }
+
+      #restauranteModal .bg-white {
+        max-height: 90vh;
+        display: flex;
+        flex-direction: column;
+      }
+
+      #listaRestaurantes {
+        scrollbar-width: thin;
+        scrollbar-color: #cbd5e0 #f7fafc;
+      }
+
+      #listaRestaurantes::-webkit-scrollbar {
+        width: 6px;
+      }
+
+      #listaRestaurantes::-webkit-scrollbar-track {
+        background: #f7fafc;
+      }
+
+      #listaRestaurantes::-webkit-scrollbar-thumb {
+        background-color: #cbd5e0;
+        border-radius: 3px;
+      }
+    </style>
+    
+    <script>
+      // Funções do Modal de Logout
+      function showLogoutModal() {
+        document.getElementById('logoutModal').classList.remove('hidden');
+      }
+      function hideLogoutModal() {
+        document.getElementById('logoutModal').classList.add('hidden');
+      }
+    </script>
+</head>
+<body
+  class="bg-gray-100 text-gray-900 min-h-screen flex flex-col"
+  data-authenticated="{% if user.is_authenticated %}true{% else %}false{% endif %}"
+>
+    <header class="bg-white shadow-md p-4 flex justify-between items-center relative" style="z-index: 1000">
+      <div class="flex items-center">
+        <a href="{% url 'home' %}" class="flex items-center group">
+          <img src="{% static 'imagem/logo.png' %}" alt="MotoTec Logo" class="h-8 w-auto mr-2">
+          <span class="text-2xl font-bold text-blue-600">MotoTec</span>
+        </a>
+        <div class="absolute left-0 mt-2 w-64 bg-white border rounded shadow-md opacity-0 group-hover:opacity-100 transition-opacity z-[60]">
+          <a href="{% url 'home' %}" class="block px-4 py-2 text-sm hover:bg-gray-100">Mapa de Calor</a>
+          <a href="{% url 'lista_restaurantes' %}" class="block px-4 py-2 text-sm hover:bg-gray-100">Restaurantes</a>
+          <a href="{% url 'tendencias' %}" class="block px-4 py-2 text-sm hover:bg-gray-100">Tendências</a>
+        </div>
+      </div>
+
+      {% if user.is_authenticated %}
+      <div class="flex items-center space-x-4">
+        <!-- Menu do usuário -->
+        <div class="relative group">
+          <button class="flex items-center space-x-2 focus:outline-none">
+            <span class="font-medium">{{ user.get_short_name|default:user.get_username }}</span>
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-gray-500" viewBox="0 0 20 20" fill="currentColor">
+              <path fill-rule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clip-rule="evenodd" />
+            </svg>
+          </button>
+          <div id="dropdownMenu"
+               class="absolute right-0 mt-2 w-48 bg-white border rounded shadow-md opacity-0 group-hover:opacity-100 transition-opacity"
+               style="z-index: 1002">
+            <a href="{% url 'home' %}" class="block px-4 py-2 text-sm hover:bg-gray-100">Mapa de Calor</a>
+            <a href="{% url 'lista_restaurantes' %}" class="block px-4 py-2 text-sm hover:bg-gray-100">Restaurantes</a>
+            <a href="{% url 'tendencias' %}" class="block px-4 py-2 text-sm hover:bg-gray-100">Tendências</a>
+            <form action="{% url 'logout' %}" method="post" class="inline">
+              {% csrf_token %}
+              <button type="submit" class="block w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-100">
+                Sair
+              </button>
+            </form>
+          </div>
+        </div>
+        <div id="mapOverlay" class="fixed inset-0 bg-black bg-opacity-50 hidden" style="z-index: 1000"></div>
+      {% else %}
+      <a href="{% url 'login' %}" class="text-sm text-blue-600 hover:underline">Entrar</a>
+      {% endif %}
+      
+      <!-- Modal de Localização -->
+      <div id="locationModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center hidden" style="z-index: 1003">
+        <div class="bg-white rounded-lg p-6 max-w-sm w-full mx-4 shadow-xl">
+          <div class="text-center">
+            <div class="mx-auto flex items-center justify-center h-12 w-12 rounded-full bg-blue-100 mb-4">
+              <svg class="h-6 w-6 text-blue-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
+              </svg>
+            </div>
+            <h3 class="text-lg font-medium text-gray-900 mb-2">Ativar Localização</h3>
+            <p class="text-sm text-gray-500 mb-6">
+              Para uma melhor experiência e uso de todos os recursos, precisamos da sua permissão para acessar sua localização.
+            </p>
+            <div class="flex justify-center gap-4">
+              <button id="denyLocation" 
+                      class="px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 hover:bg-gray-50">
+                Agora não
+              </button>
+              <button id="allowLocation" 
+                      class="px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700">
+                Permitir Localização
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+      
+      <!-- Modal de Logout -->
+      <div id="logoutModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center hidden" style="z-index: 1004">
+        <div class="bg-white rounded-lg p-6 max-w-sm w-full mx-4 shadow-xl">
+          <h3 class="text-lg font-medium text-gray-900 mb-4">Confirmar Saída</h3>
+          <p class="text-sm text-gray-500 mb-6">Tem certeza que deseja sair do sistema?</p>
+          <div class="flex justify-end space-x-3">
+            <button onclick="hideLogoutModal()" class="px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded-md">
+              Cancelar
+            </button>
+            <form action="{% url 'logout' %}" method="post" class="inline">
+              {% csrf_token %}
+              <button type="submit" class="px-4 py-2 text-sm text-white bg-red-600 hover:bg-red-700 rounded-md">
+                Sair
+              </button>
+            </form>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    {% if messages %}
+    <div id="popup-msg" class="fixed top-5 right-5 z-50 bg-green-500 text-white px-4 py-2 rounded shadow-lg">
+      {% for message in messages %}{{ message }}{% endfor %}
+    </div>
+    <script>
+      setTimeout(() => {
+        const popup = document.getElementById('popup-msg');
+        if (popup) popup.style.display = 'none';
+      }, 3000);
+    </script>
+    {% endif %}
+
+    <main class="flex-1 p-6">
+      {% block content %}{% endblock %}
+    </main>
+
+    <footer class="bg-white text-center p-4 text-sm text-gray-500">
+      &copy; {{ now|date:"Y" }} MotoTec – Todos os direitos reservados.
+    </footer>
+
+    <!-- Modal de logout -->
+    <div id="modalLogout"
+         class="fixed inset-0 flex items-center justify-center bg-black bg-opacity-50
+                z-[9999] hidden">
+      <div class="bg-white p-6 rounded shadow-lg max-w-sm w-full">
+        <h2 class="text-lg font-semibold mb-4">Deseja realmente sair?</h2>
+        <div class="flex justify-end gap-4">
+          <button onclick="fecharModalLogout()"
+                  class="px-4 py-2 bg-gray-300 rounded hover:bg-gray-400">
+            Cancelar
+          </button>
+          <form method="POST" action="{% url 'logout' %}">
+            {% csrf_token %}
+            <button type="submit"
+                    class="px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700">
+              Sim, sair
+            </button>
+          </form>
+        </div>
+      </div>
+    </div>
+
+    {% block scripts %}
+    <script>
+      // Funções globais para o modal de logout
+      function abrirModalLogout() {
+        if (typeof closeMenu === 'function') closeMenu();
+        document.getElementById('modalLogout').classList.remove('hidden');
+        // Bloqueia cliques no mapa por baixo
+        const mapPane = document.querySelector('.leaflet-container');
+        if (mapPane) mapPane.style.pointerEvents = 'none';
+      }
+      function fecharModalLogout() {
+        document.getElementById('modalLogout').classList.add('hidden');
+        const mapPane = document.querySelector('.leaflet-container');
+        if (mapPane) mapPane.style.pointerEvents = 'auto';
+      }
+
+      document.addEventListener('DOMContentLoaded', function() {
+        const menuButton   = document.getElementById('menuButton');
+        const dropdownMenu = document.getElementById('dropdownMenu');
+        const mapOverlay   = document.getElementById('mapOverlay');
+        let isMenuOpen     = false;
+
+        // Abre/fecha o dropdown do usuário
+        menuButton.addEventListener('click', function(e) {
+          e.stopPropagation();
+          isMenuOpen = !isMenuOpen;
+          if (isMenuOpen) {
+            dropdownMenu.classList.add('opacity-100');
+            dropdownMenu.classList.remove('opacity-0');
+            mapOverlay.classList.remove('hidden');
+          } else {
+            closeMenu();
+          }
+        });
+
+        // Fecha ao clicar fora
+        document.addEventListener('click', function() {
+          closeMenu();
+        });
+
+        // Impede fechamento ao clicar dentro do dropdown
+        dropdownMenu.addEventListener('click', function(e) {
+          e.stopPropagation();
+        });
+
+        // Fecha o menu e oculta o overlay
+        function closeMenu() {
+          dropdownMenu.classList.remove('opacity-100');
+          dropdownMenu.classList.add('opacity-0');
+          mapOverlay.classList.add('hidden');
+          isMenuOpen = false;
+        }
+
+        // Exponha para o escopo global
+        window.closeMenu = closeMenu;
+      });
+    </script>
+    {% endblock %}
+
+    {% block extra_js %}
+    <!-- 5) Scripts da aplicação (em ordem correta) -->
+    <script src="{% static 'js/geolocation.js' %}"></script>
+    <script src="{% static 'js/mapa.js' %}"></script>
+    <script src="{% static 'js/rota.js' %}"></script>
+    
+    <!-- Script para gerenciar navegação durante rota ativa -->
+    <script>
+      document.addEventListener('DOMContentLoaded', function() {
+        // Verifica se há uma rota ativa
+        function isRotaAtiva() {
+          const container = document.getElementById('mapaRotaContainer');
+          return container && !container.classList.contains('hidden');
+        }
+        
+        // Intercepta cliques nos links de navegação
+        document.querySelectorAll('a[href^="/"], a[href^="http"], a[href^="https"]').forEach(link => {
+          link.addEventListener('click', function(e) {
+            // Se houver uma rota ativa, mostra um aviso
+            if (isRotaAtiva() && !this.getAttribute('data-ignore-route')) {
+              e.preventDefault();
+              if (confirm('Você tem uma rota ativa. Deseja mesmo sair? A rota será perdida.')) {
+                window.location.href = this.href;
+              }
+            }
+          });
+        });
+      });
+    </script>
+    
+    <!-- Script para gerenciar o modal de detalhes do restaurante -->
+    <script>
+      document.addEventListener('DOMContentLoaded', function() {
+        const fecharModalBtn = document.getElementById('fecharModalBtn');
+        const fecharModal = document.getElementById('fecharModal');
+        const modal = document.getElementById('restauranteModal');
+
+        if (fecharModalBtn) {
+          fecharModalBtn.addEventListener('click', function() {
+            modal.classList.add('hidden');
+          });
+        }
+
+        if (fecharModal) {
+          fecharModal.addEventListener('click', function() {
+            modal.classList.add('hidden');
+          });
+        }
+
+        // Fechar modal ao clicar fora do conteúdo
+        modal.addEventListener('click', function(e) {
+          if (e.target === modal) {
+            modal.classList.add('hidden');
+          }
+        });
+      });
+    </script>
+    
+    <!-- Modal de Detalhes do Restaurante -->
+    <div id="restauranteModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[10000] hidden">
+      <div class="bg-white rounded-lg shadow-xl w-full max-w-md max-h-[90vh] flex flex-col overflow-hidden">
+        <!-- Cabeçalho do Modal -->
+        <div class="bg-blue-600 text-white p-4 flex justify-between items-center">
+          <h3 id="localizacaoAtual" class="text-lg font-semibold truncate">Carregando...</h3>
+          <button id="fecharModalBtn" class="text-white hover:text-gray-200 focus:outline-none">
+            <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+            </svg>
+          </button>
+        </div>
+        
+        <!-- Conteúdo do Modal -->
+        <div class="p-4 overflow-y-auto flex-1">
+          <!-- Lista de Restaurantes -->
+          <div id="listaRestaurantes" class="space-y-3">
+            <!-- Itens serão adicionados dinamicamente aqui -->
+          </div>
+          
+          <!-- Mensagem quando não houver restaurantes -->
+          <div id="semRestaurantes" class="hidden text-center py-8 text-gray-500">
+            <p>Nenhum restaurante encontrado neste local.</p>
+          </div>
+        </div>
+        
+        <!-- Rodapé do Modal -->
+        <div class="bg-gray-50 px-4 py-3 flex justify-between items-center border-t border-gray-200">
+          <div class="text-sm text-gray-600">
+            <span id="totalPedidos">0</span> pedidos totais
+          </div>
+          <button id="fecharModal" class="px-4 py-2 bg-gray-200 text-gray-800 rounded-md hover:bg-gray-300 focus:outline-none focus:ring-2 focus:ring-gray-400">
+            Fechar
+          </button>
+        </div>
+      </div>
+    </div>
+    {% endblock %}
+</body>
+</html>
